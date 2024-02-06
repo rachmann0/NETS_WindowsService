@@ -1,0 +1,25 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.2.32616.157
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NETS_WindowsService", "NETS_WindowsService.csproj", "{2531179A-A66A-4353-9D6D-9DB7E737E821}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{2531179A-A66A-4353-9D6D-9DB7E737E821}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{2531179A-A66A-4353-9D6D-9DB7E737E821}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{2531179A-A66A-4353-9D6D-9DB7E737E821}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{2531179A-A66A-4353-9D6D-9DB7E737E821}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {111A190E-7402-4EC8-B48C-F599BB37C6AC}
+	EndGlobalSection
+EndGlobal
