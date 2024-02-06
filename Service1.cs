@@ -114,7 +114,7 @@ namespace NETS_WindowsService
 
             // Attach an event handler for receiving data
             serialPort.DataReceived += SerialPort_DataReceived;
-            //serialPort.ErrorReceived += SerialPort_DataReceived;
+            serialPort.ErrorReceived += SerialPort_ErrorReceived;
 
             string credentials = $"{username}:{password}";
             byte[] bytes = Encoding.ASCII.GetBytes(credentials);
@@ -184,6 +184,12 @@ namespace NETS_WindowsService
 
             AppendToLogFile("Serial port closed.");
             }
+        }
+        void SerialPort_ErrorReceived(object sender, SerialErrorReceivedEventArgs e)
+        {
+            // Handle serial port errors
+            SerialPort serialPort = (SerialPort)sender;
+            AppendToLogFile($"Error received from serial port {serialPort.PortName}: {e.EventType}");
         }
 
         static string BinaryToHex(byte[] binaryData)
