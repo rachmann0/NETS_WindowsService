@@ -80,7 +80,7 @@ namespace NETS_WindowsService
             string contents = File.ReadAllText(filePath);
             // Parse the contents to extract username and password
             string json = contents;
-            AppendToLogFile(contents);
+            //AppendToLogFile(contents);
             Config config = JsonSerializer.Deserialize<Config>(json);
             username = config.Username;
             password = config.Password;
@@ -242,7 +242,7 @@ namespace NETS_WindowsService
             }
 
             // Return default value if property does not exist or has a null value
-            return default;
+            return default; // 0 if int
         }
 
 
