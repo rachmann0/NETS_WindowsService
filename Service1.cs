@@ -31,6 +31,24 @@ namespace NETS_WindowsService
         }
         static readonly string logFileName = "logs.txt";
 
+        async Task SendBinaryDataToSerialPortAsync(SerialPort serialPort, byte[] newRequestMessage)
+        {
+            // Open the serial port asynchronously
+            if (!serialPort.IsOpen)
+            {
+                serialPort.Open();
+            }
+
+            // Send the binary data to the serial port asynchronously
+            //await serialPort.BaseStream.WriteAsync(newRequestMessage, 0, newRequestMessage.Length);
+            serialPort.Write(newRequestMessage, 0, newRequestMessage.Length);
+            AppendToLogFile($"Binary Data Sent: {BinaryToHex(newRequestMessage)}");
+            //await serialPort.BaseStream.WriteAsync(newRequestMessage);
+
+        // Close the serial port after sending data
+        //serialPort.Close();
+        }
+
         static void SerialPort_DataReceived(object sender, SerialDataReceivedEventArgs e)
         {
             // This event is triggered when data is received from the serial port
@@ -67,6 +85,7 @@ namespace NETS_WindowsService
             try
             {
 
+
             // GET CONFIG
             AppendToLogFile("NETS Service Start");
             // Get the directory of the executable
@@ -95,21 +114,14 @@ namespace NETS_WindowsService
 
             // Attach an event handler for receiving data
             serialPort.DataReceived += SerialPort_DataReceived;
+            //serialPort.ErrorReceived += SerialPort_DataReceived;
 
-        // Write data to the serial port
-/*        string dataToSend = "Hello, Serial Port!";
-        byte[] buffer = System.Text.Encoding.UTF8.GetBytes(dataToSend);
-        serialPort.Write(buffer, 0, buffer.Length);
-        AppendToLogFile("Binary Data Sent Successfully.");
-*/
-
-/*        Task loopTask = Task.Run(async () =>
-            {
-*/
             string credentials = $"{username}:{password}";
             byte[] bytes = Encoding.ASCII.GetBytes(credentials);
             string base64 = Convert.ToBase64String(bytes);
             httpClient.DefaultRequestHeaders.Add("Authorization", $"Basic {base64}");
+
+
             while (true)
             {
                 //AppendToLogFile("send binary data");
@@ -127,6 +139,12 @@ namespace NETS_WindowsService
 
                         int ECN = GetPropertyValue<int>(root, "ECN");
                         string newRequestMessage = GetPropertyValue<string>(root, "Message");
+                        // Decode the Base64 string to a byte array
+                        if (!string.IsNullOrEmpty(newRequestMessage))
+                        {
+                            byte[] reqMessageBytes = Convert.FromBase64String(newRequestMessage);
+                            newRequestMessage = BinaryToHex(reqMessageBytes);
+                        }
 
                         AppendToLogFile($"ECN: {ECN}");
                         AppendToLogFile($"newRequestMessage: {newRequestMessage}");
@@ -144,12 +162,13 @@ namespace NETS_WindowsService
                             if (response2.IsSuccessStatusCode && !string.IsNullOrEmpty(newRequestMessage))
                             {
                                 // Send binary data to serial port
-                                //await SendBinaryDataToSerialPort(serialPort, newRequestMessage);
+                                await SendBinaryDataToSerialPortAsync(serialPort, HexToBinary(newRequestMessage));
                             }
                         }
 
-                        await Task.Delay(10*1000);
+                        await Task.Delay(5*1000);
             }
+
 
 
             }
@@ -165,6 +184,41 @@ namespace NETS_WindowsService
 
             AppendToLogFile("Serial port closed.");
             }
+        }
+
+        static string BinaryToHex(byte[] binaryData)
+        {
+            return BitConverter.ToString(binaryData);
+        }
+
+        static byte[] HexToBinary(string hexString)
+        {
+            hexString = hexString.Replace("-", ""); // Remove hyphens
+            if (IsHexString(hexString))
+            {
+                byte[] binaryData = new byte[hexString.Length / 2];
+                for (int i = 0; i < binaryData.Length; i++)
+                {
+                    binaryData[i] = Convert.ToByte(hexString.Substring(i * 2, 2), 16);
+                }
+                return binaryData;
+            }
+            else
+            {
+                return new byte[0]; // Return empty byte array if input is not a valid hexadecimal string
+            }
+        }
+
+        static bool IsHexString(string value)
+        {
+            foreach (char c in value)
+            {
+                if (!Uri.IsHexDigit(c))
+                {
+                    return false;
+                }
+            }
+            return true;
         }
 
         static string FormatDateTimeToString(DateTime dateTime)
@@ -186,7 +240,6 @@ namespace NETS_WindowsService
                 writer.WriteLine($"{FormatDateTimeToString(DateTime.Now)};{content}");
             }
         }
-
 
         static void ClearLogFileIfLatestEntryIsFromYesterday(string logFileName)
         {
