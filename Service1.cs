@@ -31,30 +31,123 @@ namespace NETS_WindowsService
         }
         static readonly string logFileName = "logs.txt";
 
+        TaskCompletionSource<string> tcs = new TaskCompletionSource<string>();
+        SerialPort serialPort;
+        byte[] latestBinaryDataSent = { };
+        bool isRecieveACK = false;
+        bool isReqMessageResolved = true;
+        string latestPartialMessage = "";
+        string completeMessage = "";
         async Task SendBinaryDataToSerialPortAsync(SerialPort serialPort, byte[] newRequestMessage)
         {
+            isReqMessageResolved = false;
+            latestBinaryDataSent = newRequestMessage;
+            int reIssueAttempts = 0;
             // Open the serial port asynchronously
             if (!serialPort.IsOpen)
             {
                 serialPort.Open();
             }
+            
+            Task<string> Promise()
+            {
+                // Send the binary data to the serial port
+                serialPort.Write(newRequestMessage, 0, newRequestMessage.Length);
+                AppendToLogFile($"Binary Data Sent: {BinaryToHex(newRequestMessage)}");
+                return tcs.Task;
+            }
 
-            // Send the binary data to the serial port asynchronously
-            //await serialPort.BaseStream.WriteAsync(newRequestMessage, 0, newRequestMessage.Length);
-            serialPort.Write(newRequestMessage, 0, newRequestMessage.Length);
-            AppendToLogFile($"Binary Data Sent: {BinaryToHex(newRequestMessage)}");
-            //await serialPort.BaseStream.WriteAsync(newRequestMessage);
+            try {
+                string code = await Promise();
+                AppendToLogFile($"code: {code}");
+            while ((code == "no-response" || code == "NACK") && reIssueAttempts < 2) {
+                code = await Promise();
+                AppendToLogFile($"code: {code}");
+                reIssueAttempts++;
+            }
+        } catch (Exception ex) {
+            AppendToLogFile($"Error: {ex.Message}");
+        } finally {
+            // reset statuses for next request
+            isRecieveACK = false;
+            isReqMessageResolved = true;
+            latestBinaryDataSent = null;
+            latestPartialMessage = null;
+            completeMessage = "";
+            AppendToLogFile("request resolved");
+        }
 
         // Close the serial port after sending data
         //serialPort.Close();
         }
 
-        static void SerialPort_DataReceived(object sender, SerialDataReceivedEventArgs e)
+        async void SerialPort_DataReceived(object sender, SerialDataReceivedEventArgs e)
         {
             // This event is triggered when data is received from the serial port
             SerialPort sp = (SerialPort)sender;
-            string data = sp.ReadExisting(); // Read the received data
-            AppendToLogFile($"Received data: {data}");
+        /*    string dataAscii = sp.ReadExisting(); // Read the received data
+            byte[] data = Encoding.UTF8.GetBytes(dataAscii);
+        */
+            int bytesToRead = sp.BytesToRead;
+            byte[] buffer = new byte[bytesToRead];
+            sp.Read(buffer, 0, bytesToRead);
+            string newResponse = BinaryToHex(buffer);
+
+            //Console.WriteLine($"Received data: {newResponse}");
+            string hexNACK = "15";
+            string hexACK = "06";
+            if (newResponse == hexACK)
+            {
+                isRecieveACK = true;
+            }
+            else if (newResponse == hexNACK)
+            {
+                tcs.SetResult(hexNACK);
+            }
+            else
+            {
+                if (isRecieveACK)
+                {
+                    if (latestPartialMessage == "")
+                    {
+                        latestPartialMessage = newResponse;
+                        completeMessage = latestPartialMessage;
+                    }
+                    else
+                    {
+                        latestPartialMessage = newResponse;
+                        completeMessage = completeMessage + "-" + latestPartialMessage;
+                    }
+                }
+                // IF REACHED 1C SEPERATOR AND 03 STX RESOLVE
+                if (!(completeMessage.Length >= 8)) return;
+                if (completeMessage.Substring(completeMessage.Length - 8, 5).ToUpper().Contains("1C-03"))
+                {
+                    AppendToLogFile($"completeMessage: {completeMessage}");
+                    string apiUrl = baseURL + "/SC_NETS_IS/rest/NETS/TerminalResponse";
+                    var data = new
+                    {
+                        RequestMessage = BinaryToHex(latestBinaryDataSent),
+                        TerminalResponse = completeMessage
+                    };
+                    string postData = JsonSerializer.Serialize(data);
+                    HttpResponseMessage response = await httpClient.PostAsync(apiUrl, new StringContent(postData, Encoding.UTF8, "application/json"));
+                    AppendToLogFile(response.IsSuccessStatusCode.ToString());
+                    if (!response.IsSuccessStatusCode) return;
+
+                    string responseData = await response.Content.ReadAsStringAsync();
+                    if (bool.Parse(responseData))
+                    {
+                        SendACK(serialPort);
+                        tcs.SetResult("RESOLVED");
+                    }
+        /*            JsonDocument document = JsonDocument.Parse(responseData);
+                    JsonElement root = document.RootElement;
+                    int ECN = GetPropertyValue<int>(root, "ECN");
+                    string newRequestMessage = GetPropertyValue<string>(root, "Message");
+        */            
+                }
+            }
         }
 
         async protected override void OnStart(string[] args)
@@ -63,12 +156,12 @@ namespace NETS_WindowsService
             string baseDirectory = AppDomain.CurrentDomain.BaseDirectory;
             string logFileName = "logs.txt";
             string logFilePath = Path.Combine(baseDirectory, logFileName);
-            if (!File.Exists(logFileName)) {
+            if (!File.Exists(logFilePath)) {
                 // Create the log file if it doesn't exist
-                File.WriteAllText(logFileName, "");
-                Console.WriteLine($"File '{logFileName}' created.");
+                File.WriteAllText(logFilePath, "");
+                Console.WriteLine($"File '{logFilePath}' created.");
             }
-            ClearLogFileIfLatestEntryIsFromYesterday(logFileName);
+            ClearLogFileIfOldestEntryIsFromYesterday(logFilePath);
 
             // INIT SERIAL PORT
             string[] ports = SerialPort.GetPortNames();
@@ -79,7 +172,7 @@ namespace NETS_WindowsService
             }
             // Select the first available serial port
             string selectedPort = ports[0];
-            SerialPort serialPort = new SerialPort(selectedPort, 9600); // Specify the baud rate
+            serialPort = new SerialPort(selectedPort, 9600); // Specify the baud rate
             serialPort.Open();
 
             try
@@ -146,7 +239,7 @@ namespace NETS_WindowsService
                             newRequestMessage = BinaryToHex(reqMessageBytes);
                         }
 
-                        AppendToLogFile($"ECN: {ECN}");
+                        //AppendToLogFile($"ECN: {ECN}");
                         AppendToLogFile($"newRequestMessage: {newRequestMessage}");
 
 
@@ -184,6 +277,21 @@ namespace NETS_WindowsService
 
             AppendToLogFile("Serial port closed.");
             }
+        }
+
+        static void SendACK(SerialPort serialPort)
+        {
+            byte[] ACK = HexToBinary("06");
+            serialPort.Write(ACK, 0, ACK.Length);
+
+            Console.WriteLine("ACK sent successfully.");
+        }
+        static void SendNACK(SerialPort serialPort)
+        {
+            byte[] NACK = HexToBinary("15");
+            serialPort.Write(NACK, 0, NACK.Length);
+
+            Console.WriteLine("NACK sent successfully.");
         }
         void SerialPort_ErrorReceived(object sender, SerialErrorReceivedEventArgs e)
         {
@@ -247,23 +355,27 @@ namespace NETS_WindowsService
             }
         }
 
-        static void ClearLogFileIfLatestEntryIsFromYesterday(string logFileName)
+        static void ClearLogFileIfOldestEntryIsFromYesterday(string logFilePath)
         {
             // Read all lines from the log file
-            string[] lines = File.ReadAllLines(logFileName);
+            string[] lines = File.ReadAllLines(logFilePath);
 
+            AppendToLogFile($"lines: {lines.Length}");
             // Check if there are any log entries
             if (lines.Length > 0)
             {
                 // Get the timestamp from the latest log entry
-                string latestLogEntry = lines.Last();
+                //string latestLogEntry = lines.Last();
+                string latestLogEntry = lines.First();
                 DateTime latestLogTimestamp = ParseLogTimestamp(latestLogEntry);
 
+                AppendToLogFile(latestLogTimestamp.Date.ToString());
+                AppendToLogFile(DateTime.Today.ToString());
                 // Check if the latest log entry is from yesterday
                 if (latestLogTimestamp.Date < DateTime.Today)
                 {
                     // Clear the log file
-                    ClearLogFile(logFileName);
+                    ClearLogFile(logFilePath);
                 }
             }
         }
@@ -274,17 +386,17 @@ namespace NETS_WindowsService
             string timestampStr = parts[0];
             return DateTime.ParseExact(timestampStr, "yyyy-MM-dd HH:mm:ss", null);
         }
-        static void ClearLogFile(string logFileName)
+        static void ClearLogFile(string logFilePath)
         {
             try
             {
                 // Clear the contents of the log file
-                File.WriteAllText(logFileName, "");
-                Console.WriteLine("Log file cleared.");
+                File.WriteAllText(logFilePath, "");
+                AppendToLogFile("Log file cleared.");
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Error clearing log file: {ex.Message}");
+                AppendToLogFile($"Error clearing log file: {ex.Message}");
             }
         }
         static T GetPropertyValue<T>(JsonElement element, string propertyName)
